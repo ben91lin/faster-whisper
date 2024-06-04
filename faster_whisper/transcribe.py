@@ -68,6 +68,7 @@ class TranscriptionOptions(NamedTuple):
     append_punctuations: str
     max_new_tokens: Optional[int]
     clip_timestamps: Union[str, List[float]]
+    condition_on_previous_clip: bool
     hallucination_silence_threshold: Optional[float]
     hotwords: Optional[str]
 
@@ -236,6 +237,7 @@ class WhisperModel:
         max_new_tokens: Optional[int] = None,
         chunk_length: Optional[int] = None,
         clip_timestamps: Union[str, List[float]] = "0",
+        condition_on_previous_clip: bool = False,
         hallucination_silence_threshold: Optional[float] = None,
         hotwords: Optional[str] = None,
         language_detection_threshold: Optional[float] = None,
@@ -470,6 +472,7 @@ class WhisperModel:
             append_punctuations=append_punctuations,
             max_new_tokens=max_new_tokens,
             clip_timestamps=clip_timestamps,
+            condition_on_previous_clip=condition_on_previous_clip,
             hallucination_silence_threshold=hallucination_silence_threshold,
             hotwords=hotwords,
         )
@@ -552,6 +555,8 @@ class WhisperModel:
                 seek = seek_clip_start
             if seek >= seek_clip_end:
                 clip_idx += 1
+                if not options.condition_on_previous_clip:
+                    prompt_reset_since = len(all_tokens)
                 if clip_idx < len(seek_clips):
                     seek = seek_clips[clip_idx][0]
                 continue
