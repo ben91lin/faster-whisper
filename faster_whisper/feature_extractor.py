@@ -114,6 +114,56 @@ class FeatureExtractor:
 
             frames.append(frame)
         return np.stack(frames, 0)
+    
+    def fram_wave_batch(self, waveform, center=True, start_sample=0, end_sample=None):
+        """
+        Transform a raw waveform into a list of smaller waveforms.
+        The window length defines how much of the signal is contained in each frame (small waveform),
+        while the hop length defines the step between the beginning of each new frame.
+        Centering is done by reflecting the waveform which is first centered around
+        `frame_idx * hop_length`.
+        Parameters:
+            waveform (np.array): Input waveform.
+            center (bool): Whether to center each frame around `frame_idx * hop_length`.
+            start_sample (int): The index of the first sample to process.
+            end_sample (int): The index of the last sample to process (inclusive).
+        """
+        frames = []
+        half_window = (self.n_fft - 1) // 2 + 1
+        
+        if end_sample is None:
+            end_sample = waveform.shape[0]
+        end_sample = min(end_sample, waveform.shape[0])
+
+        for i in range(start_sample, end_sample + 1, self.hop_length):
+            if center:
+                start = max(0, i - half_window)
+                end = min(i + half_window, waveform.shape[0])
+
+                frame = waveform[start:end]
+
+                # Handle padding at the beginning of the waveform
+                if start == 0:
+                    padd_width = (-i + half_window, 0)
+                    frame = np.pad(frame, pad_width=padd_width, mode="reflect")
+
+                # Handle padding at the end of the waveform
+                if end == waveform.shape[0]:
+                    padd_width = (0, (i + half_window - waveform.shape[0]))
+                    frame = np.pad(frame, pad_width=padd_width, mode="reflect")
+            else:
+                frame = waveform[i:i + self.n_fft]
+                frame_width = frame.shape[0]
+                if frame_width < waveform.shape[0]:
+                    frame = np.lib.pad(
+                        frame,
+                        pad_width=(0, self.n_fft - frame_width),
+                        mode="constant",
+                        constant_values=0,
+                    )
+
+            frames.append(frame)
+        return np.stack(frames, 0)
 
     def stft(self, frames, window):
         """
@@ -156,15 +206,17 @@ class FeatureExtractor:
 
         window = np.hanning(self.n_fft + 1)[:-1]
 
-        frames = self.fram_wave(waveform)
-        stft = self.stft(frames, window=window)
-        magnitudes = np.abs(stft[:, :-1]) ** 2
+        mel_specs = []
+        batch_sample = 4 * self.n_fft * self.sampling_rate
+        for start_sample in range(0, waveform.shape[0], batch_sample):
+            frames = self.fram_wave_batch(waveform, start_sample=start_sample, end_sample=start_sample+batch_sample)
+            stft = self.stft(frames, window=window)
+            magnitudes = np.abs(stft[:, :-1]) ** 2
+            mel_spec = self.mel_filters @ magnitudes
+            mel_specs.append(mel_spec)
 
-        filters = self.mel_filters
-        mel_spec = filters @ magnitudes
-
+        mel_spec = np.concatenate(mel_specs, axis=1)
         log_spec = np.log10(np.clip(mel_spec, a_min=1e-10, a_max=None))
         log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
         log_spec = (log_spec + 4.0) / 4.0
-
         return log_spec
